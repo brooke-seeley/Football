@@ -2,6 +2,7 @@ library(tidyverse)
 library(tidymodels)
 library(readxl)
 library(embed)
+library(vroom)
 library(yardstick)
 
 ## Read in Data
@@ -16,11 +17,39 @@ trainData <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
     BYU == "Y" ~ 1)) %>%
   mutate(BYU = factor(BYU))
 
+trainDataClean <- trainData %>%
+  mutate(across(c(EThree, Utah, LDS, Alumni, Poly),
+                ~ ifelse(. == "Y", 1, 0)))
+
+vroom_write(x=trainDataClean, file="./traindata.csv", delim=',')
+
+trainDataUnclean <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
+  filter(Class != '2026') %>%
+  mutate(BYU = case_when(
+    BYU == "N" ~ 0,
+    BYU == "Y" ~ 1))
+
+vroom_write(x=trainDataUnclean, file="./newtraindata.csv", delim=',')
+
 ### Test Data (2026)
 
 testData <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
   filter(Class == '2026') %>%
   select(-First, -Last, -Class, -BYU)
+
+testDataClean <- testData %>%
+  mutate(across(c(EThree, Utah, LDS, Alumni, Poly),
+                ~ ifelse(. == "Y", 1, 0)))
+
+vroom_write(x=testDataClean, file="./testdata.csv", delim=',')
+
+testDataUnclean <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
+  filter(Class == '2026') %>%
+  mutate(BYU = case_when(
+    BYU == "N" ~ 0,
+    BYU == "Y" ~ 1))
+
+vroom_write(x=testDataUnclean, file="./newtestdata.csv", delim=',')
 
 ### Actual 2026 Response
 
@@ -242,3 +271,15 @@ test_results <- tree_predictions %>%
 roc_auc(test_results, truth = truth, .pred_1)
 
 #####
+
+## DataRobot 
+### Elastic-Net Classifier (mixing alpha=0.5 / Binomial Deviance) - 0.325
+
+elasticnetresults <- vroom('elasticnetresult.csv')
+
+test_results <- elasticnetresults %>%
+  bind_cols(tibble(truth = test_labels$BYU))
+
+roc_auc(test_results, truth = truth, BYU_PREDICTION)
+
+###
