@@ -27,7 +27,8 @@ trainDataUnclean <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
   filter(Class != '2026') %>%
   mutate(BYU = case_when(
     BYU == "N" ~ 0,
-    BYU == "Y" ~ 1))
+    BYU == "Y" ~ 1)) %>%
+  select(-Class)
 
 vroom_write(x=trainDataUnclean, file="./newtraindata.csv", delim=',')
 
@@ -45,9 +46,7 @@ vroom_write(x=testDataClean, file="./testdata.csv", delim=',')
 
 testDataUnclean <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
   filter(Class == '2026') %>%
-  mutate(BYU = case_when(
-    BYU == "N" ~ 0,
-    BYU == "Y" ~ 1))
+  select(-First, -Last)
 
 vroom_write(x=testDataUnclean, file="./newtestdata.csv", delim=',')
 
