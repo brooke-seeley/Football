@@ -337,39 +337,41 @@ library(yardstick)
 ## Making Models Based on Features DataRobot Called Important
 #####
 
-### Read in Data
+# ### Read in Data
+# 
+# trainData <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
+#   mutate(BYU = case_when(
+#     BYU == "N" ~ 0,
+#     BYU == "Y" ~ 1)) %>%
+#   mutate(BYU = factor(BYU)) %>%
+#   select(EThree, Utah, Score, LDS, Alumni, BYU)
+# 
+# set.seed(123)
+# split <- initial_split(trainData, prop = 0.8, strata = BYU)
+# trainData <- training(split)
+# testData <- testing(split)
+# 
+# ### Upsampling on Train Data because of Imbalance
+# 
+# majority <- trainData %>% filter(BYU == 0)
+# minority <- trainData %>% filter(BYU == 1)
+#  
+# minority_upsampled <- minority %>% slice_sample(n = nrow(majority), 
+#                                                 replace = TRUE)
+# 
+# trainData <- bind_rows(majority, minority_upsampled)
+# 
+# ### Recipe
+# 
+# recipe <- recipe(BYU ~ ., data = trainData) %>%
+#   step_mutate(across(c(EThree, Utah, LDS, Alumni), ~ factor(.))) %>%
+#   step_dummy(all_factor_predictors()) %>%
+#   step_interact(terms = ~ Utah_Y:LDS_Y + LDS_Y:Alumni_Y + EThree_Y:Score)
+# 
+# recipe_prep <- prep(recipe)
+# bake(recipe_prep, new_data = trainData)
 
-trainData <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
-  mutate(BYU = case_when(
-    BYU == "N" ~ 0,
-    BYU == "Y" ~ 1)) %>%
-  mutate(BYU = factor(BYU)) %>%
-  select(EThree, Utah, Score, LDS, Alumni, BYU)
-
-set.seed(123)
-split <- initial_split(trainData, prop = 0.8, strata = BYU)
-trainData <- training(split)
-testData <- testing(split)
-
-### Upsampling on Train Data because of Imbalance
-
-majority <- trainData %>% filter(BYU == 0)
-minority <- trainData %>% filter(BYU == 1)
- 
-minority_upsampled <- minority %>% slice_sample(n = nrow(majority), 
-                                                replace = TRUE)
-
-trainData <- bind_rows(majority, minority_upsampled)
-
-### Recipe
-
-recipe <- recipe(BYU ~ ., data = trainData) %>%
-  step_mutate(across(c(EThree, Utah, LDS, Alumni), ~ factor(.))) %>%
-  step_dummy(all_factor_predictors()) %>%
-  step_interact(terms = ~ Utah_Y:LDS_Y + LDS_Y:Alumni_Y + EThree_Y:Score)
-
-recipe_prep <- prep(recipe)
-bake(recipe_prep, new_data = trainData)
+#####
 
 ### Random Forest Model - roc_auc: 0.218
 #####
@@ -431,55 +433,202 @@ bake(recipe_prep, new_data = trainData)
 ### Penalized Logistic Regression - roc_auc: 0.0901
 #####
 
-library(glmnet)
-
-preg_mod <- logistic_reg(mixture=tune(), penalty=tune()) %>%
-  set_engine("glmnet")
-
-preg_workflow <- workflow() %>%
-  add_recipe(recipe) %>%
-  add_model(preg_mod)
-
-### Grid of values to tune over
-
-tuning_grid <- grid_regular(penalty(),
-                            mixture(),
-                            levels = 5)
-
-### CV
-
-folds <- vfold_cv(trainData, v = 5, repeats = 1)
-
-CV_results <- preg_workflow %>%
-  tune_grid(resamples=folds,
-            grid=tuning_grid,
-            metrics(metric_set(roc_auc)))
-
-### Find Best Tuning Parameters
-
-bestTune <- CV_results %>%
-  select_best(metric="roc_auc")
-print(bestTune)
-
-### Finalize the Workflow & fit it
-
-final_wf <-
-  preg_workflow %>%
-  finalize_workflow(bestTune) %>%
-  fit(data=trainData)
-
-### Predict
-
-pen_reg_predictions <- final_wf %>%
-  predict(new_data = testData, type="prob")
-
-### Calculate roc_auc
-
-test_results <- pen_reg_predictions %>%
-  bind_cols(testData %>% select(BYU))
-
-roc_auc(test_results, truth = BYU, .pred_1)
+# library(glmnet)
+# 
+# preg_mod <- logistic_reg(mixture=tune(), penalty=tune()) %>%
+#   set_engine("glmnet")
+# 
+# preg_workflow <- workflow() %>%
+#   add_recipe(recipe) %>%
+#   add_model(preg_mod)
+# 
+# ### Grid of values to tune over
+# 
+# tuning_grid <- grid_regular(penalty(),
+#                             mixture(),
+#                             levels = 5)
+# 
+# ### CV
+# 
+# folds <- vfold_cv(trainData, v = 5, repeats = 1)
+# 
+# CV_results <- preg_workflow %>%
+#   tune_grid(resamples=folds,
+#             grid=tuning_grid,
+#             metrics(metric_set(roc_auc)))
+# 
+# ### Find Best Tuning Parameters
+# 
+# bestTune <- CV_results %>%
+#   select_best(metric="roc_auc")
+# print(bestTune)
+# 
+# ### Finalize the Workflow & fit it
+# 
+# final_wf <-
+#   preg_workflow %>%
+#   finalize_workflow(bestTune) %>%
+#   fit(data=trainData)
+# 
+# ### Predict
+# 
+# pen_reg_predictions <- final_wf %>%
+#   predict(new_data = testData, type="prob")
+# 
+# ### Calculate roc_auc
+# 
+# test_results <- pen_reg_predictions %>%
+#   bind_cols(testData %>% select(BYU))
+# 
+# roc_auc(test_results, truth = BYU, .pred_1)
 
 #####
 
 ## Yikes, both super low. Manual upsampling may not be the way.
+
+## Suggested RF Model from ChatGPT - 0.895, it looks like my model WAS good,
+## R was just misunderstanding levels. So, technically, all of my roc_aucs
+## should be flipped.
+#####
+
+### Clean setup (this fixes factor levels AND probability direction)
+
+library(themis)
+
+set.seed(123)
+
+data <- read_excel("RecruitmentPrediction.xlsx", sheet = "Data") %>%
+  select(
+    EThree, Position, Utah, Distance, Height, Weight,
+    Score, LDS, Alumni, Poly, BYU
+  ) %>%
+  mutate(
+    across(c(EThree, Utah, LDS, Alumni, Poly), as.factor),
+    Position = as.factor(Position),
+    BYU = factor(BYU, levels = c("N", "Y"))  # 'Y' = positive class
+  )
+
+### Train/test split (leave test untouched)
+
+split <- initial_split(data, prop = 0.8, strata = BYU)
+trainData <- training(split)
+testData  <- testing(split)
+
+trainData <- trainData %>%
+  mutate(BYU = factor(BYU, levels = c("Y","N")))
+
+testData <- testData %>%
+  mutate(BYU = factor(BYU, levels = c("Y","N")))
+
+folds <- vfold_cv(trainData, v = 5, strata = BYU)
+
+### Recipe with SMOTE (done correctly)
+
+rec <- recipe(BYU ~ ., data = trainData) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_smote(BYU, neighbors = 5)
+
+### Model: Random Forest
+
+rf_mod <- rand_forest(
+  mtry  = tune(),
+  min_n = tune(),
+  trees = tune()
+) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+### Workflow
+
+wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(rf_mod)
+
+### Tuning grid
+
+grid <- grid_regular(
+  mtry(range = c(2, 8)),
+  min_n(),
+  trees(range = c(300, 800)),
+  levels = 5
+)
+
+### Cross-validation (correct ROC AUC)
+
+cv_results <- wf %>%
+  tune_grid(
+    resamples = folds,
+    grid = grid,
+    metrics = metric_set(roc_auc)
+  )
+
+show_best(cv_results, metric = "roc_auc")
+
+### Fit final model
+
+best_params <- select_best(cv_results, metric = "roc_auc")
+
+final_wf <- wf %>%
+  finalize_workflow(best_params) %>%
+  fit(trainData)
+
+### Predict on your real test set
+
+test_preds <- predict(final_wf, testData, type = "prob") %>%
+  bind_cols(testData %>% select(BYU))
+
+roc_auc(test_preds, truth = BYU, .pred_Y)
+
+#####
+
+## Prep for Presenting
+#####
+
+library(readr)
+
+### Get predicted probabilities on test data
+
+full_preds <- final_wf %>%
+  predict(new_data = data, type = "prob") %>%
+  bind_cols(data)
+
+### Clean column names for Tableau
+
+tableau_data <- full_preds %>%
+  mutate(
+    Actual = if_else(BYU == "Y", "Committed", "Not Committed")
+  ) %>%
+  select(
+    Actual,
+    Commitment_Probability = .pred_Y,
+    EThree, Position, Utah, Distance, Height, Weight, Score, LDS, Alumni, Poly
+  )
+
+### Export for Tableau
+
+library(writexl)
+
+write_xlsx(tableau_data, "byu_commitment_model.xlsx")
+
+### A Little Look-See
+
+full_roc <- roc_auc(full_preds, truth = BYU, .pred_Y)
+
+1 - full_roc$.estimate
+
+### Accuracy-Wise
+
+full_preds <- read_excel("byu_commitment_model.xlsx")
+
+test_results <- full_preds %>%
+  mutate(
+    Predicted = factor(if_else(Commitment_Probability >= 0.5, 
+                               "Committed", "Not Committed"), 
+                       levels = c("Committed", "Not Committed"))
+  ) %>%
+  mutate(Actual = factor(Actual))
+
+# Compute accuracy
+accuracy(test_results, truth = Actual, estimate = Predicted)
+
+#####
