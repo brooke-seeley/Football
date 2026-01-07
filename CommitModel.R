@@ -568,6 +568,8 @@ show_best(cv_results, metric = "roc_auc")
 
 best_params <- select_best(cv_results, metric = "roc_auc")
 
+### mtry = 8, trees = 675, min_n = 40
+
 final_wf <- wf %>%
   finalize_workflow(best_params) %>%
   fit(trainData)
