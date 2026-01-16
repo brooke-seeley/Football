@@ -634,3 +634,119 @@ test_results <- full_preds %>%
 accuracy(test_results, truth = Actual, estimate = Predicted)
 
 #####
+
+## 247 Creating Model Code
+#####
+### Read in Data
+
+data <- read_excel("RecruitmentPrediction.xlsx", sheet = "247Data") %>%
+  select(
+    '247Top', Position, Utah, Distance, Height, Weight,
+    Score, LDS, Alumni, Poly, BYU
+  ) %>%
+  mutate(
+    across(c('247Top', Utah, LDS, Alumni, Poly), as.factor),
+    Position = as.factor(Position),
+    BYU = factor(BYU, levels = c("N", "Y"))  # 'Y' = positive class
+  )
+
+### Train/test split (leave test untouched)
+
+split <- initial_split(data, prop = 0.8, strata = BYU)
+trainData <- training(split)
+testData  <- testing(split)
+
+trainData <- trainData %>%
+  mutate(BYU = factor(BYU, levels = c("Y","N")))
+
+testData <- testData %>%
+  mutate(BYU = factor(BYU, levels = c("Y","N")))
+
+folds <- vfold_cv(trainData, v = 5, strata = BYU)
+
+### Recipe with SMOTE (done correctly)
+
+rec <- recipe(BYU ~ ., data = trainData) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_smote(BYU, neighbors = 5)
+
+### Model: Random Forest
+
+rf_mod <- rand_forest(
+  mtry  = tune(),
+  min_n = tune(),
+  trees = tune()
+) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+### Workflow
+
+wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(rf_mod)
+
+### Tuning grid
+
+grid <- grid_regular(
+  mtry(range = c(2, 8)),
+  min_n(),
+  trees(range = c(300, 800)),
+  levels = 5
+)
+
+### Cross-validation (correct ROC AUC)
+
+cv_results <- wf %>%
+  tune_grid(
+    resamples = folds,
+    grid = grid,
+    metrics = metric_set(roc_auc)
+  )
+
+show_best(cv_results, metric = "roc_auc")
+
+### Fit final model
+
+best_params <- select_best(cv_results, metric = "roc_auc")
+
+### mtry = 8, trees = 425, min_n = 40
+
+final_wf <- wf %>%
+  finalize_workflow(best_params) %>%
+  fit(trainData)
+
+### Predict on your real test set
+
+test_preds <- predict(final_wf, testData, type = "prob") %>%
+  bind_cols(testData %>% select(BYU))
+
+roc_auc(test_preds, truth = BYU, .pred_Y) # 0.838
+
+### Tableau Prep
+
+library(readr)
+
+### Get predicted probabilities on test data
+
+full_preds <- final_wf %>%
+  predict(new_data = data, type = "prob") %>%
+  bind_cols(data)
+
+### Clean column names for Tableau
+
+tableau_data <- full_preds %>%
+  mutate(
+    Actual = if_else(BYU == "Y", "Committed", "Not Committed")
+  ) %>%
+  select(
+    Actual,
+    Commitment_Probability = .pred_Y,
+    '247Top', Position, Utah, Distance, Height, Weight, Score, LDS, Alumni, Poly
+  )
+
+library(writexl)
+
+write_xlsx(tableau_data, "byu_247_model.xlsx")
+
+#####
